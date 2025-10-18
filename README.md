@@ -43,8 +43,21 @@ bun install
 # 数据库连接（已配置 Docker PostgreSQL）
 DATABASE_URL="postgresql://lighttest:lighttest123@localhost:5433/lighttest?schema=public"
 
-# OpenAI API Key（需要配置）
+# OpenAI API Key（需要配置，用于 AI 生成 Gherkin 测试用例）
 OPENAI_API_KEY="your-openai-api-key-here"
+
+# Better Auth Secret（必需，用于加密 session）
+# 使用 openssl rand -base64 32 生成
+BETTER_AUTH_SECRET="your-32-byte-random-string"
+
+# Better Auth URL（生产环境必需，本地开发可选）
+# 本地开发使用默认值 http://localhost:3000
+BETTER_AUTH_URL="http://localhost:3000"
+```
+
+**生成 BETTER_AUTH_SECRET：**
+```bash
+openssl rand -base64 32
 ```
 
 ### 3. 启动 PostgreSQL 数据库
@@ -67,11 +80,35 @@ bun run dev
 
 访问 [http://localhost:3000](http://localhost:3000)
 
-### 6. 测试账号
+### 6. 创建测试账号
 
-测试账号信息请查看项目根目录的 `secret.txt` 文件。
+运行用户同步脚本：
+
+```bash
+bun run db:seed
+```
+
+**测试账号：**
+- 邮箱：`test@lighttest.com`
+- 密码：`test123456`
+
+> 注：如需添加更多账号，可在项目根目录创建 `secret.txt` 文件并按格式配置。
 
 ## 使用指南
+
+### 需求示例演示
+
+平台已内置示例需求，帮助快速了解功能：
+
+1. **查看示例**：在需求列表页面，点击任意需求的"查看示例"按钮
+2. **复制示例**：点击"复制该需求模板"即可将示例复制到当前项目
+3. **快速上手**：示例包含完整的 Gherkin 测试用例和解析后的测试用例表格
+
+**内置示例需求：**
+- 用户登录功能验证
+- 支付流程测试
+- 商品搜索功能
+- 订单管理系统
 
 ### 步骤 1: 语义输入
 
