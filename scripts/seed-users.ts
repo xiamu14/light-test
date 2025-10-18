@@ -84,7 +84,9 @@ async function seedUsers() {
 
   console.log(`📋 从 secret.txt 读取到 ${users.length} 个用户账号`);
 
-  const baseURL = "http://localhost:3000";
+  // 从环境变量获取目标 URL，默认为本地
+  const baseURL = process.env.TARGET_URL || "http://localhost:3000";
+  console.log(`🎯 目标环境: ${baseURL}`);
 
   for (const userData of users) {
     try {

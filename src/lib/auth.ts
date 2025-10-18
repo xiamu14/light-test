@@ -15,7 +15,7 @@ export const auth = betterAuth({
   },
   trustedOrigins:
     process.env.NODE_ENV === "production"
-      ? [process.env.BETTER_AUTH_URL || "https://light-test-ten.vercel.app"]
+      ? [process.env.BETTER_AUTH_URL!]
       : ["http://localhost:3000", "http://localhost:3001"],
   session: {
     expiresIn: 60 * 60 * 24 * 7, // 7 days
