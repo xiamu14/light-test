@@ -10,10 +10,16 @@ import {
   ModalBody,
   ModalFooter,
   useDisclosure,
+  Avatar,
+  Dropdown,
+  DropdownTrigger,
+  DropdownMenu,
+  DropdownItem,
 } from "@heroui/react";
-import { Trash2 } from "lucide-react";
+import { Trash2, LogOut } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { useSession, signOut } from "@/lib/auth-client";
 
 interface Project {
   id: string;
@@ -41,6 +47,7 @@ export function Sidebar({ currentProjectId, onProjectSelect }: SidebarProps) {
     name: string;
   } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const { data: session } = useSession();
 
   useEffect(() => {
     loadProjects();
@@ -76,12 +83,15 @@ export function Sidebar({ currentProjectId, onProjectSelect }: SidebarProps) {
 
       if (res.ok) {
         const newProject = await res.json();
-        setProjects([newProject, ...projects]);
+        await loadProjects(); // 重新加载列表
         setNewProjectName("");
         setShowCreateForm(false);
         if (onProjectSelect) {
           onProjectSelect(newProject.id);
         }
+        toast.success("创建成功");
+      } else {
+        toast.error("创建失败");
       }
     } catch (error) {
       console.error("创建项目失败:", error);
@@ -110,10 +120,8 @@ export function Sidebar({ currentProjectId, onProjectSelect }: SidebarProps) {
       });
 
       if (res.ok) {
-        setProjects(projects.filter((p) => p.id !== projectToDelete.id));
-        // 如果删除的是当前选中的项目，清空选择
+        // 如果删除的是当前选中的项目，选择下一个项目
         if (currentProjectId === projectToDelete.id && onProjectSelect) {
-          // 选择第一个项目（如果还有的话）
           const remainingProjects = projects.filter(
             (p) => p.id !== projectToDelete.id
           );
@@ -123,6 +131,7 @@ export function Sidebar({ currentProjectId, onProjectSelect }: SidebarProps) {
             onProjectSelect("");
           }
         }
+        await loadProjects(); // 重新加载列表
         onClose();
         setProjectToDelete(null);
         toast.success("删除成功");
@@ -134,6 +143,16 @@ export function Sidebar({ currentProjectId, onProjectSelect }: SidebarProps) {
       toast.error("删除失败");
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+      toast.success("已退出登录");
+    } catch (error) {
+      console.error("退出登录失败:", error);
+      toast.error("退出登录失败");
     }
   };
 
@@ -241,11 +260,36 @@ export function Sidebar({ currentProjectId, onProjectSelect }: SidebarProps) {
         </div>
       </div>
 
-      {/* 底部信息 */}
-      <div className="space-y-1 p-4 text-gray-500 text-xs">
-        <div>© 2025 LightTest</div>
-        <div>v1.0.0</div>
-      </div>
+      {/* 用户信息区域 */}
+      {session?.user && (
+        <div className="p-4 border-gray-800">
+          <Dropdown placement="top">
+            <DropdownTrigger>
+              <div className="flex items-center gap-3 hover:bg-gray-800 p-2 rounded-lg transition-colors cursor-pointer">
+                <Avatar src="https://i.pravatar.cc/150?u=a042581f4e29026024d" />
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-white text-sm truncate">
+                    {session.user.name || "用户"}
+                  </div>
+                  <div className="text-gray-400 text-xs truncate">
+                    {session.user.email}
+                  </div>
+                </div>
+              </div>
+            </DropdownTrigger>
+            <DropdownMenu aria-label="用户操作">
+              <DropdownItem
+                key="logout"
+                color="danger"
+                startContent={<LogOut size={16} />}
+                onPress={handleSignOut}
+              >
+                退出登录
+              </DropdownItem>
+            </DropdownMenu>
+          </Dropdown>
+        </div>
+      )}
 
       {/* 删除确认模态框 */}
       <Modal isOpen={isOpen} onClose={onClose} backdrop="blur">
@@ -267,7 +311,12 @@ export function Sidebar({ currentProjectId, onProjectSelect }: SidebarProps) {
             </div>
           </ModalBody>
           <ModalFooter>
-            <Button variant="flat" onPress={onClose} isDisabled={isDeleting}>
+            <Button
+              variant="flat"
+              onPress={onClose}
+              isDisabled={isDeleting}
+              size="sm"
+            >
               取消
             </Button>
             <Button
@@ -275,6 +324,7 @@ export function Sidebar({ currentProjectId, onProjectSelect }: SidebarProps) {
               onPress={confirmDelete}
               isLoading={isDeleting}
               startContent={!isDeleting ? <Trash2 size={16} /> : null}
+              size="sm"
             >
               确认删除
             </Button>

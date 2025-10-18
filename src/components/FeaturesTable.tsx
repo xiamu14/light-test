@@ -22,15 +22,14 @@ import {
   Tab,
   Select,
   SelectItem,
+  Pagination,
 } from "@heroui/react";
-import { Trash2 } from "lucide-react";
-import dynamic from "next/dynamic";
+import { Trash2, BookOpen } from "lucide-react";
 import { toast } from "sonner";
-
-const MonacoEditor = dynamic(
-  () => import("@monaco-editor/react").then((mod) => mod.default),
-  { ssr: false, loading: () => <Spinner /> }
-);
+import { GherkinEditor } from "@/components/GherkinEditor";
+import { TruncatedText } from "@/components/ui/truncated-text";
+import { RequirementExamplesModal } from "@/components/RequirementExamplesModal";
+import type { RequirementExample } from "@/lib/requirement-examples";
 
 type FeatureStatus = "IN_PROGRESS" | "COMPLETED";
 
@@ -58,8 +57,15 @@ export function FeaturesTable({
 }: FeaturesTableProps) {
   const [features, setFeatures] = useState<Feature[]>([]);
   const [filteredFeatures, setFilteredFeatures] = useState<Feature[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [tableLoading, setTableLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("IN_PROGRESS");
+
+  // 分页状态
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(10);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+
   const { isOpen, onOpen, onClose } = useDisclosure();
   const {
     isOpen: isViewOpen,
@@ -70,6 +76,11 @@ export function FeaturesTable({
     isOpen: isDeleteOpen,
     onOpen: onDeleteOpen,
     onClose: onDeleteClose,
+  } = useDisclosure();
+  const {
+    isOpen: isExamplesOpen,
+    onOpen: onExamplesOpen,
+    onClose: onExamplesClose,
   } = useDisclosure();
 
   // 创建/编辑表单
@@ -96,7 +107,7 @@ export function FeaturesTable({
     if (projectId) {
       loadFeatures();
     }
-  }, [projectId]);
+  }, [projectId, page, pageSize]);
 
   // 筛选功能
   useEffect(() => {
@@ -109,16 +120,20 @@ export function FeaturesTable({
 
   const loadFeatures = async () => {
     try {
-      setLoading(true);
-      const res = await fetch(`/api/features?projectId=${projectId}`);
+      setTableLoading(true);
+      const res = await fetch(
+        `/api/features?projectId=${projectId}&page=${page}&pageSize=${pageSize}`
+      );
       if (res.ok) {
-        const data = await res.json();
-        setFeatures(data);
+        const response = await res.json();
+        setFeatures(response.data);
+        setTotal(response.pagination.total);
+        setTotalPages(response.pagination.totalPages);
       }
     } catch (error) {
       console.error("加载需求列表失败:", error);
     } finally {
-      setLoading(false);
+      setTableLoading(false);
     }
   };
 
@@ -152,25 +167,41 @@ export function FeaturesTable({
   };
 
   const handleSave = async () => {
-    if (!formData.name.trim() || !formData.gherkinContent.trim()) {
-      toast.error("请填写需求名称并生成 Gherkin 内容");
+    if (!formData.name.trim() || !formData.semanticInput.trim()) {
+      toast.error("请填写需求名称和需求描述");
       return;
     }
 
     setIsSaving(true);
     try {
+      // 1. 生成 Gherkin
+      const gherkinRes = await fetch("/api/ai/generate-gherkin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ semanticInput: formData.semanticInput }),
+      });
+
+      if (!gherkinRes.ok) {
+        toast.error("生成 Gherkin 失败，请检查 OpenAI API 配置");
+        return;
+      }
+
+      const gherkinData = await gherkinRes.json();
+
+      // 2. 创建需求并生成测试用例
       const res = await fetch("/api/features", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...formData,
+          name: formData.name,
+          semanticInput: formData.semanticInput,
+          gherkinContent: gherkinData.gherkinContent,
           projectId,
         }),
       });
 
       if (res.ok) {
-        const newFeature = await res.json();
-        setFeatures([newFeature, ...features]);
+        await loadFeatures(); // 重新加载列表
         onClose();
         setFormData({ name: "", semanticInput: "", gherkinContent: "" });
         toast.success("保存成功！测试用例已自动生成");
@@ -226,7 +257,7 @@ export function FeaturesTable({
     }
   };
 
-  const handleRegenerateTestCases = async (replaceAll: boolean) => {
+  const handleRegenerateTestCases = async () => {
     if (!currentFeature || !editedGherkin.trim()) {
       toast.error("Gherkin 内容不能为空");
       return;
@@ -240,7 +271,7 @@ export function FeaturesTable({
         body: JSON.stringify({
           id: currentFeature.id,
           gherkinContent: editedGherkin,
-          replaceAll, // true: 完全覆盖，false: diff 更新
+          replaceAll: false, // 总是使用差异更新
         }),
       });
 
@@ -250,7 +281,7 @@ export function FeaturesTable({
           features.map((f) => (f.id === currentFeature.id ? updatedFeature : f))
         );
         onViewClose();
-        toast.success(replaceAll ? "测试用例已完全重新生成" : "测试用例已差异更新");
+        toast.success("测试用例已更新");
         loadFeatures();
       } else {
         toast.error("更新失败");
@@ -289,7 +320,9 @@ export function FeaturesTable({
       // 检查是否所有测试用例都通过
       if (passedCount < totalTestCases) {
         toast.error(
-          `还有 ${totalTestCases - passedCount} 个测试用例未通过，无法标记为已完成`
+          `还有 ${
+            totalTestCases - passedCount
+          } 个测试用例未通过，无法标记为已完成`
         );
         return;
       }
@@ -331,7 +364,7 @@ export function FeaturesTable({
       });
 
       if (res.ok) {
-        setFeatures(features.filter((f) => f.id !== featureToDelete.id));
+        await loadFeatures(); // 重新加载列表
         onDeleteClose();
         setFeatureToDelete(null);
         toast.success("删除成功");
@@ -346,11 +379,42 @@ export function FeaturesTable({
     }
   };
 
+  // 从示例创建需求（不生成测试用例）
+  const handleCopyExample = async (example: RequirementExample) => {
+    try {
+      // 只创建需求，不生成测试用例
+      const res = await fetch("/api/features", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: example.title,
+          semanticInput: example.description,
+          gherkinContent: example.gherkin,
+          projectId,
+          skipTestCases: true, // 跳过测试用例生成
+        }),
+      });
+
+      if (res.ok) {
+        await loadFeatures(); // 重新加载列表
+        toast.success("需求已创建！");
+      } else {
+        toast.error("创建失败");
+      }
+    } catch (error) {
+      console.error("创建需求失败:", error);
+      toast.error("创建失败");
+    }
+  };
+
   return (
-    <div className="p-6 pt-[12px]">
+    <div className="flex flex-col p-6 pt-[12px] h-full">
       <div className="flex justify-between items-center mb-4">
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-2">
           <h2 className="font-semibold text-xl">需求列表</h2>
+          <span className="text-gray-500 dark:text-gray-400 text-sm">
+            共 {total} 条
+          </span>
           {/* 状态筛选标签 */}
           <Tabs
             selectedKey={statusFilter}
@@ -360,121 +424,156 @@ export function FeaturesTable({
           >
             <Tab key="IN_PROGRESS" title="进行中" />
             <Tab key="COMPLETED" title="已完成" />
-            <Tab key="ALL" title="全部" />
+            {/* <Tab key="ALL" title="全部" /> */}
           </Tabs>
         </div>
-        <Button color="primary" onPress={handleOpenCreate}>
-          + 新建需求
-        </Button>
-      </div>
-
-      {loading ? (
-        <div className="flex justify-center py-12">
-          <Spinner size="lg" />
-        </div>
-      ) : filteredFeatures.length === 0 ? (
-        <div className="bg-white dark:bg-gray-800 py-12 border border-gray-200 dark:border-gray-700 rounded-lg text-center">
-          <p className="text-gray-500 dark:text-gray-400">
-            {statusFilter === "IN_PROGRESS"
-              ? "暂无进行中的需求"
-              : statusFilter === "COMPLETED"
-              ? "暂无已完成的需求"
-              : "暂无需求"}
-          </p>
-          <Button color="primary" className="mt-4" onPress={handleOpenCreate}>
-            创建第一个需求
+        <div className="flex gap-2">
+          <Button color="primary" onPress={handleOpenCreate} size="sm">
+            + 新建需求
+          </Button>
+          <Button
+            color="default"
+            variant="flat"
+            onPress={onExamplesOpen}
+            size="sm"
+          >
+            需求示例
           </Button>
         </div>
-      ) : (
-        <Table aria-label="需求列表">
-          <TableHeader>
-            <TableColumn>需求名称</TableColumn>
-            <TableColumn>需求描述</TableColumn>
-            <TableColumn>测试用例</TableColumn>
-            <TableColumn>状态</TableColumn>
-            <TableColumn>创建时间</TableColumn>
-            <TableColumn>操作</TableColumn>
-          </TableHeader>
-          <TableBody>
-            {filteredFeatures.map((feature) => (
-              <TableRow key={feature.id}>
-                <TableCell className="font-medium">{feature.name}</TableCell>
-                <TableCell className="max-w-md truncate">
-                  {feature.semanticInput}
-                </TableCell>
-                <TableCell>
-                  <span className="text-sm">
-                    <span className="font-medium text-green-600 dark:text-green-400">
-                      {feature.passedCount || 0}
-                    </span>
-                    <span className="text-gray-500 dark:text-gray-400">
-                      {" "}
-                      /{" "}
-                    </span>
-                    <span className="text-gray-700 dark:text-gray-300">
-                      {feature._count?.testCases || 0}
-                    </span>
-                  </span>
-                </TableCell>
-                <TableCell>
-                  <Select
-                    size="sm"
-                    selectedKeys={[feature.status]}
-                    onChange={(e) =>
-                      handleStatusChange(
-                        feature.id,
-                        e.target.value as FeatureStatus
-                      )
-                    }
-                    className="min-w-[120px]"
-                  >
-                    <SelectItem key="IN_PROGRESS">进行中</SelectItem>
-                    <SelectItem key="COMPLETED">已完成</SelectItem>
-                  </Select>
-                </TableCell>
-                <TableCell>
-                  {new Date(feature.createdAt).toLocaleDateString("zh-CN")}
-                </TableCell>
-                <TableCell>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      color="primary"
-                      onPress={() => onFeatureSelect?.(feature.id)}
-                    >
-                      查看用例
-                    </Button>
-                    <Button
-                      size="sm"
-                      color="default"
-                      variant="flat"
-                      onPress={() => handleViewGherkin(feature)}
-                    >
-                      编辑 Gherkin
-                    </Button>
-                    <Button
-                      size="sm"
-                      color="danger"
-                      variant="light"
-                      onPress={() => handleDelete(feature)}
-                      startContent={<Trash2 size={16} />}
-                      className="hover:cursor-pointer"
-                    >
-                      删除
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+      </div>
+
+      {/* 内容区域 - 占据剩余空间 */}
+      <div className="relative flex-1 min-h-0">
+        {filteredFeatures.length === 0 ? (
+          <div className="bg-white dark:bg-gray-800 py-12 border border-gray-200 dark:border-gray-700 rounded-lg text-center">
+            <p className="text-gray-500 dark:text-gray-400">
+              {statusFilter === "IN_PROGRESS"
+                ? "暂无进行中的需求"
+                : statusFilter === "COMPLETED"
+                ? "暂无已完成的需求"
+                : "暂无需求"}
+            </p>
+            {total === 0 ? (
+              <Button
+                color="primary"
+                className="mt-4"
+                onPress={handleOpenCreate}
+               size="sm">
+                新建需求
+              </Button>
+            ) : null}
+          </div>
+        ) : (
+          <div className="h-full overflow-x-auto">
+            {tableLoading && (
+              <div className="z-10 absolute inset-0 flex justify-center items-center bg-white/50 dark:bg-gray-900/50">
+                <Spinner size="lg" />
+              </div>
+            )}
+            <Table aria-label="需求列表">
+              <TableHeader>
+                <TableColumn>需求名称</TableColumn>
+                <TableColumn>需求描述</TableColumn>
+                <TableColumn>测试用例</TableColumn>
+                <TableColumn>状态</TableColumn>
+                <TableColumn>创建时间</TableColumn>
+                <TableColumn>操作</TableColumn>
+              </TableHeader>
+              <TableBody>
+                {filteredFeatures.map((feature) => (
+                  <TableRow key={feature.id}>
+                    <TableCell className="max-w-xs font-medium">
+                      <TruncatedText text={feature.name} />
+                    </TableCell>
+                    <TableCell className="max-w-md">
+                      <TruncatedText text={feature.semanticInput} />
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-sm">
+                        <span className="font-medium text-green-600 dark:text-green-400">
+                          {feature.passedCount || 0}
+                        </span>
+                        <span className="text-gray-500 dark:text-gray-400">
+                          {" "}
+                          /{" "}
+                        </span>
+                        <span className="text-gray-700 dark:text-gray-300">
+                          {feature._count?.testCases || 0}
+                        </span>
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <Select
+                        size="sm"
+                        selectedKeys={[feature.status]}
+                        onChange={(e) =>
+                          handleStatusChange(
+                            feature.id,
+                            e.target.value as FeatureStatus
+                          )
+                        }
+                        className="min-w-[120px]"
+                      >
+                        <SelectItem key="IN_PROGRESS">进行中</SelectItem>
+                        <SelectItem key="COMPLETED">已完成</SelectItem>
+                      </Select>
+                    </TableCell>
+                    <TableCell>
+                      {new Date(feature.createdAt).toLocaleDateString("zh-CN")}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          color="primary"
+                          onPress={() => onFeatureSelect?.(feature.id)}
+                        >
+                          测试用例
+                        </Button>
+                        <Button
+                          size="sm"
+                          color="default"
+                          variant="flat"
+                          onPress={() => handleViewGherkin(feature)}
+                        >
+                          编辑 Gherkin
+                        </Button>
+                        <Button
+                          size="sm"
+                          color="danger"
+                          variant="flat"
+                          onPress={() => handleDelete(feature)}
+                          startContent={<Trash2 size={16} />}
+                          className="hover:cursor-pointer"
+                        ></Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </div>
+
+      {/* 分页组件 - 固定在底部 */}
+      {totalPages > 1 && (
+        <div className="flex justify-center mt-4">
+          <Pagination
+            total={totalPages}
+            page={page}
+            onChange={setPage}
+            showControls
+            color="primary"
+          />
+        </div>
       )}
 
-      {/* 创建/编辑模态框 */}
+      {/* 创建需求模态框 */}
       <Modal
         isOpen={isOpen}
         onClose={onClose}
-        size="5xl"
+        size="3xl"
         scrollBehavior="inside"
       >
         <ModalContent>
@@ -488,56 +587,30 @@ export function FeaturesTable({
                 onValueChange={(value) =>
                   setFormData({ ...formData, name: value })
                 }
+                isRequired
               />
 
               <Textarea
                 label="需求描述"
-                placeholder="输入自然语言需求描述..."
-                minRows={4}
+                placeholder="输入自然语言需求描述，AI 将自动生成 Gherkin 并解析为测试用例..."
+                minRows={8}
                 value={formData.semanticInput}
                 onValueChange={(value) =>
                   setFormData({ ...formData, semanticInput: value })
                 }
+                isRequired
               />
 
-              <Button
-                color="primary"
-                onPress={handleGenerateGherkin}
-                isLoading={isGenerating}
-                isDisabled={!formData.semanticInput.trim()}
-              >
-                生成 Gherkin 测试用例
-              </Button>
-
-              {formData.gherkinContent && (
-                <div>
-                  <label className="block mb-2 font-medium text-sm">
-                    Gherkin 内容（可编辑）
-                  </label>
-                  <div className="border rounded-lg overflow-hidden">
-                    <MonacoEditor
-                      height="300px"
-                      defaultLanguage="gherkin"
-                      value={formData.gherkinContent}
-                      onChange={(value) =>
-                        setFormData({
-                          ...formData,
-                          gherkinContent: value || "",
-                        })
-                      }
-                      theme="vs-light"
-                      options={{
-                        minimap: { enabled: false },
-                        fontSize: 14,
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
+              <div className="bg-blue-50 dark:bg-blue-900/20 p-4 border border-blue-200 dark:border-blue-800 rounded-lg">
+                <p className="text-gray-700 dark:text-gray-300 text-sm">
+                  <strong>提示：</strong>
+                  点击"生成测试用例"后，AI 将自动生成 Gherkin 并解析为测试用例。
+                </p>
+              </div>
             </div>
           </ModalBody>
           <ModalFooter>
-            <Button variant="flat" onPress={onClose}>
+            <Button variant="flat" onPress={onClose} size="sm">
               取消
             </Button>
             <Button
@@ -545,10 +618,11 @@ export function FeaturesTable({
               onPress={handleSave}
               isLoading={isSaving}
               isDisabled={
-                !formData.name.trim() || !formData.gherkinContent.trim()
+                !formData.name.trim() || !formData.semanticInput.trim()
               }
+              size="sm"
             >
-              保存并生成测试用例
+              {isSaving ? "生成中..." : "生成测试用例"}
             </Button>
           </ModalFooter>
         </ModalContent>
@@ -563,7 +637,7 @@ export function FeaturesTable({
       >
         <ModalContent>
           <ModalHeader>查看 Gherkin - {currentFeature?.name}</ModalHeader>
-          <ModalBody>
+          <ModalBody className="scrollbar-hide">
             <div className="space-y-4">
               <Textarea
                 label="需求描述"
@@ -578,63 +652,41 @@ export function FeaturesTable({
                 onPress={handleGenerateGherkinInView}
                 isLoading={isGeneratingInView}
                 isDisabled={!editedSemanticInput.trim()}
-              >
-                生成 Gherkin 测试用例
+               size="sm">
+                生成 Gherkin
               </Button>
 
               <div>
                 <label className="block mb-2 font-medium text-sm">
-                  Gherkin 内容（可编辑）
+                  Gherkin 内容(可编辑)
                 </label>
-                <div className="border rounded-lg overflow-hidden">
-                  <MonacoEditor
-                    height="400px"
-                    defaultLanguage="gherkin"
-                    value={editedGherkin}
-                    onChange={(value) => setEditedGherkin(value || "")}
-                    theme="vs-dark"
-                    options={{
-                      minimap: { enabled: false },
-                      fontSize: 14,
-                    }}
-                  />
-                </div>
+                <GherkinEditor
+                  value={editedGherkin}
+                  onChange={(value) => setEditedGherkin(value)}
+                  height="400px"
+                />
               </div>
 
               <div className="bg-blue-50 dark:bg-blue-900/20 p-4 border border-blue-200 dark:border-blue-800 rounded-lg">
                 <p className="text-gray-700 dark:text-gray-300 text-sm">
                   <strong>提示：</strong>
+                  编辑 Gherkin
+                  后点击"更新测试用例"，将会保留现有测试用例，只添加新的测试用例（差异更新）。
+                  用户手动添加的测试用例不会被删除。
                 </p>
-                <ul className="space-y-1 mt-2 text-gray-600 dark:text-gray-400 text-sm list-disc list-inside">
-                  <li>
-                    <strong>完全覆盖：</strong>删除所有现有测试用例，根据新的
-                    Gherkin 内容重新生成
-                  </li>
-                  <li>
-                    <strong>差异更新：</strong>
-                    保留现有测试用例，只添加新的测试用例（推荐）
-                  </li>
-                </ul>
               </div>
             </div>
           </ModalBody>
           <ModalFooter>
-            <Button variant="flat" onPress={onViewClose}>
+            <Button variant="flat" onPress={onViewClose} size="sm">
               取消
             </Button>
             <Button
-              color="warning"
-              onPress={() => handleRegenerateTestCases(true)}
-              isLoading={isRegenerating}
-            >
-              完全覆盖
-            </Button>
-            <Button
               color="primary"
-              onPress={() => handleRegenerateTestCases(false)}
+              onPress={handleRegenerateTestCases}
               isLoading={isRegenerating}
-            >
-              差异更新
+             size="sm">
+              更新测试用例
             </Button>
           </ModalFooter>
         </ModalContent>
@@ -663,7 +715,7 @@ export function FeaturesTable({
               variant="flat"
               onPress={onDeleteClose}
               isDisabled={isDeleting}
-            >
+             size="sm">
               取消
             </Button>
             <Button
@@ -677,6 +729,13 @@ export function FeaturesTable({
           </ModalFooter>
         </ModalContent>
       </Modal>
+
+      {/* 需求示例模态框 */}
+      <RequirementExamplesModal
+        isOpen={isExamplesOpen}
+        onClose={onExamplesClose}
+        onCopyExample={handleCopyExample}
+      />
     </div>
   );
 }

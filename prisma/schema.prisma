@@ -14,16 +14,81 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// 用户表
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  projects      Project[]
+  sessions      Session[]
+  accounts      Account[]
+}
+
+// Better Auth - Session 表
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  token     String   @unique
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+// Better Auth - Account 表 (用于 OAuth)
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId         String
+  providerId        String
+  accessToken       String? @db.Text
+  refreshToken      String? @db.Text
+  idToken           String? @db.Text
+  expiresAt         DateTime?
+  password          String? // 用于邮箱密码登录
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+}
+
+// Verification 表 (用于邮箱验证)
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([identifier, value])
+}
+
 // 项目表
 model Project {
   id          String   @id @default(cuid())
   name        String
   description String?
+  userId      String   // 关联用户
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   modules     Module[]
   features    Feature[]
+
+  @@index([userId])
 }
 
 // 模块表
@@ -81,6 +146,8 @@ model TestCase {
   environment      String?                 // 环境
   status           TestCaseStatus @default(NOT_EXECUTED)
   executor         String?                 // 执行人
+  groupId          String?                 // 测试用例组ID（同一场景多个期望时使用）
+  defectFeedback   String?        @db.Text @default("") // 缺陷反馈（Markdown格式）
   featureId        String
   feature          Feature        @relation(fields: [featureId], references: [id], onDelete: Cascade)
   createdAt        DateTime       @default(now())

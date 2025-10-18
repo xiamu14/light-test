@@ -1,7 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { Button } from "@heroui/react";
+import {
+  Button,
+  Avatar,
+  Dropdown,
+  DropdownTrigger,
+  DropdownMenu,
+  DropdownItem,
+} from "@heroui/react";
+import { useSession, signOut } from "@/lib/auth-client";
+import { LogOut, User } from "lucide-react";
 
 export interface BreadcrumbItem {
   label: string;
@@ -14,6 +23,13 @@ interface HeaderProps {
 }
 
 export function Header({ breadcrumbs, actions }: HeaderProps) {
+  const { data: session } = useSession();
+
+  const handleSignOut = async () => {
+    await signOut();
+    window.location.reload();
+  };
+
   return (
     <div className="flex justify-between items-center bg-gray-50 dark:bg-gray-900 px-6 h-[60px]">
       {/* 面包屑导航 */}
@@ -38,11 +54,6 @@ export function Header({ breadcrumbs, actions }: HeaderProps) {
           </div>
         ))}
       </nav>
-
-      {/* 操作按钮区域 */}
-      {actions && (
-        <div className="flex items-center gap-2 h-full">{actions}</div>
-      )}
     </div>
   );
 }

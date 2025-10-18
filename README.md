@@ -67,6 +67,10 @@ bun run dev
 
 访问 [http://localhost:3000](http://localhost:3000)
 
+### 6. 测试账号
+
+测试账号信息请查看项目根目录的 `secret.txt` 文件。
+
 ## 使用指南
 
 ### 步骤 1: 语义输入
@@ -188,10 +192,31 @@ bun run format
 # 代码检查
 bun run lint
 
+# 同步用户账号（本地或生产环境）
+bun run db:seed
+
 # Prisma 相关
 bunx prisma studio          # 打开数据库管理界面
 bunx prisma migrate dev     # 创建新的数据库迁移
+bunx prisma migrate deploy  # 部署迁移到生产环境
 bunx prisma generate        # 生成 Prisma Client
+```
+
+## 部署到 Vercel
+
+详细的部署指南请查看 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
+
+简要步骤：
+1. 准备生产环境 PostgreSQL 数据库（推荐 Neon）
+2. 在 Vercel 配置环境变量
+3. 部署项目
+4. 运行数据库迁移和用户同步
+
+```bash
+# 连接到生产数据库并同步
+export DATABASE_URL="your-production-db-url"
+bunx prisma migrate deploy
+bun run db:seed
 ```
 
 ## 项目状态
