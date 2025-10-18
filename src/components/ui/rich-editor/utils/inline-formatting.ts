@@ -1,4 +1,4 @@
-import { getNodeTextContent, hasInlineChildren, TextNode } from "../types"
+import { getNodeTextContent, hasInlineChildren, TextNode, InlineText } from "../types"
 
 /**
  * Split a text node into inline segments based on selection range
@@ -45,8 +45,6 @@ export function convertToInlineFormat(node: TextNode): TextNode {
     content: undefined, // Remove content property
     children: [
       {
-        id: `${node.id}-text-${Date.now()}`,
-        type: "text",
         content: content,
       },
     ],
@@ -80,13 +78,11 @@ export function applyFormatting(
   )
 
   // Build new children array
-  const newChildren: TextNode[] = []
+  const newChildren: InlineText[] = []
 
   // Add "before" text if it exists
   if (before) {
     newChildren.push({
-      id: `${node.id}-before-${Date.now()}`,
-      type: "text",
       content: before,
     })
   }
@@ -94,20 +90,14 @@ export function applyFormatting(
   // Add formatted selection as a span
   if (selected) {
     newChildren.push({
-      id: `${node.id}-span-${Date.now()}`,
-      type: "span",
       content: selected,
-      attributes: {
-        className: className,
-      },
+      className: className,
     })
   }
 
   // Add "after" text if it exists
   if (after) {
     newChildren.push({
-      id: `${node.id}-after-${Date.now()}`,
-      type: "text",
       content: after,
     })
   }
@@ -124,21 +114,17 @@ export function applyFormatting(
  * @param children - Array of inline text nodes
  * @returns Merged array
  */
-export function mergeAdjacentTextNodes(children: TextNode[]): TextNode[] {
+export function mergeAdjacentTextNodes(children: InlineText[]): InlineText[] {
   if (children.length <= 1) return children
 
-  const merged: TextNode[] = []
+  const merged: InlineText[] = []
   let current = children[0]
 
   for (let i = 1; i < children.length; i++) {
     const next = children[i]
 
-    // Check if both are plain text nodes (not spans) with same attributes
-    if (
-      current.type === "text" &&
-      next.type === "text" &&
-      current.attributes?.className === next.attributes?.className
-    ) {
+    // Check if both have same className
+    if (current.className === next.className) {
       // Merge them
       current = {
         ...current,
@@ -199,9 +185,7 @@ export function getFormattingAtPosition(
   for (const child of node.children!) {
     const childLength = (child.content || "").length
     if (offset >= currentOffset && offset <= currentOffset + childLength) {
-      return child.attributes?.className
-        ? [String(child.attributes.className)]
-        : []
+      return child.className ? [child.className] : []
     }
     currentOffset += childLength
   }

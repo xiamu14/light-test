@@ -281,6 +281,10 @@ export async function PATCH(request: NextRequest) {
       include: { testCases: true },
     });
 
+    if (!featureWithTestCases) {
+      return NextResponse.json({ error: '功能特性不存在' }, { status: 404 });
+    }
+
     // 更新 Gherkin 内容
     await prisma.feature.update({
       where: { id },
