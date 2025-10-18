@@ -48,13 +48,19 @@ DATABASE_URL="postgresql://user:pass@host.neon.tech/dbname?sslmode=require"
 # OpenAI API Key
 OPENAI_API_KEY="your-openai-api-key"
 
-# Better Auth（可选，用于 GitHub OAuth）
-GITHUB_CLIENT_ID="your-github-client-id"
-GITHUB_CLIENT_SECRET="your-github-client-secret"
+# Better Auth Secret（必需！用于加密 session）
+BETTER_AUTH_SECRET="生成的32字节随机字符串"
 
-# Better Auth 环境
+# Better Auth URL（必需！设置为你的 Vercel 域名）
 BETTER_AUTH_URL="https://your-app.vercel.app"
+
+# Node 环境
 NODE_ENV="production"
+```
+
+**生成 BETTER_AUTH_SECRET:**
+```bash
+openssl rand -base64 32
 ```
 
 ### 4. 运行数据库迁移
